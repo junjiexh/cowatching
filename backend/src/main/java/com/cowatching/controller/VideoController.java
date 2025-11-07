@@ -18,7 +18,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.net.MalformedURLException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -146,9 +146,9 @@ public class VideoController {
                     .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + video.getFilename() + "\"")
                     .body(resource);
 
-        } catch (IOException e) {
+        } catch (MalformedURLException e) {
             Map<String, String> error = new HashMap<>();
-            error.put("error", "Failed to load video: " + e.getMessage());
+            error.put("error", "Invalid file path: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         } catch (Exception e) {
             Map<String, String> error = new HashMap<>();
