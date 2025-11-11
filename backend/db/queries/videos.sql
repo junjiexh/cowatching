@@ -14,7 +14,7 @@ ORDER BY created_at DESC;
 
 -- name: UpdateVideoPlayback :one
 UPDATE videos
-SET current_time = $2, is_playing = $3, updated_at = CURRENT_TIMESTAMP
+SET playback_position = $2, is_playing = $3, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
 RETURNING *;
 
