@@ -15,7 +15,7 @@ type Handlers struct {
 func New(db *database.Database) *Handlers {
 	return &Handlers{
 		Health: NewHealthHandler(db),
-		Video:  NewVideoHandler(),
+		Video:  NewVideoHandler(db),
 		// Initialize other handlers here
 	}
 }

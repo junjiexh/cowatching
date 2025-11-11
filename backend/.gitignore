@@ -29,5 +29,5 @@ go.work
 .DS_Store
 Thumbs.db
 
-# Generated files
-internal/database/db/
+# Uploads
+uploads/

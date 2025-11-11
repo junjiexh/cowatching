@@ -7,10 +7,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/junjiexh/cowatching/internal/database"
+	"github.com/junjiexh/cowatching/internal/database/db"
 )
 
 const (
@@ -19,26 +24,29 @@ const (
 )
 
 type VideoHandler struct {
+	db          *database.Database
+	queries     *db.Queries
 	uploadsPath string
 }
 
-type Video struct {
-	ID          string    `json:"id"`
+type VideoResponse struct {
+	ID          int64     `json:"id"`
 	Title       string    `json:"title"`
-	Filename    string    `json:"filename"`
 	URL         string    `json:"url"`
 	Size        int64     `json:"size"`
 	ContentType string    `json:"contentType"`
 	UploadedAt  time.Time `json:"uploadedAt"`
 }
 
-func NewVideoHandler() *VideoHandler {
+func NewVideoHandler(database *database.Database) *VideoHandler {
 	// Ensure uploads directory exists
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		panic(fmt.Sprintf("failed to create uploads directory: %v", err))
 	}
 
 	return &VideoHandler{
+		db:          database,
+		queries:     db.NewWithPool(database.Pool),
 		uploadsPath: uploadsDir,
 	}
 }
@@ -84,6 +92,7 @@ func (h *VideoHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	// Copy the uploaded file to the destination
 	size, err := io.Copy(dst, file)
 	if err != nil {
+		os.Remove(filePath) // Clean up on error
 		http.Error(w, "Failed to save video", http.StatusInternalServerError)
 		return
 	}
@@ -94,87 +103,91 @@ func (h *VideoHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		title = strings.TrimSuffix(header.Filename, ext)
 	}
 
-	// Create response
-	video := Video{
-		ID:          fmt.Sprintf("%d", timestamp),
+	// Save to database
+	video, err := h.queries.CreateUploadedVideo(r.Context(), db.CreateUploadedVideoParams{
 		Title:       title,
 		Filename:    filename,
-		URL:         fmt.Sprintf("/api/v1/videos/stream/%s", filename),
-		Size:        size,
 		ContentType: contentType,
-		UploadedAt:  time.Now(),
+		FileSize:    size,
+	})
+	if err != nil {
+		os.Remove(filePath) // Clean up on error
+		http.Error(w, "Failed to save video metadata", http.StatusInternalServerError)
+		return
+	}
+
+	// Create response
+	response := VideoResponse{
+		ID:          video.ID,
+		Title:       video.Title,
+		URL:         fmt.Sprintf("/api/v1/videos/stream/%d", video.ID),
+		Size:        video.FileSize,
+		ContentType: video.ContentType,
+		UploadedAt:  video.CreatedAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(video)
+	json.NewEncoder(w).Encode(response)
 }
 
 // List returns all uploaded videos
 func (h *VideoHandler) List(w http.ResponseWriter, r *http.Request) {
-	files, err := os.ReadDir(h.uploadsPath)
+	videos, err := h.queries.ListUploadedVideos(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to read videos", http.StatusInternalServerError)
+		http.Error(w, "Failed to list videos", http.StatusInternalServerError)
 		return
 	}
 
-	videos := []Video{}
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		info, err := file.Info()
-		if err != nil {
-			continue
-		}
-
-		// Extract timestamp from filename
-		parts := strings.SplitN(file.Name(), "_", 2)
-		var timestamp int64
-		var title string
-		if len(parts) == 2 {
-			fmt.Sscanf(parts[0], "%d", &timestamp)
-			ext := filepath.Ext(parts[1])
-			title = strings.TrimSuffix(parts[1], ext)
-		} else {
-			timestamp = info.ModTime().Unix()
-			ext := filepath.Ext(file.Name())
-			title = strings.TrimSuffix(file.Name(), ext)
-		}
-
-		video := Video{
-			ID:         fmt.Sprintf("%d", timestamp),
-			Title:      title,
-			Filename:   file.Name(),
-			URL:        fmt.Sprintf("/api/v1/videos/stream/%s", file.Name()),
-			Size:       info.Size(),
-			UploadedAt: info.ModTime(),
-		}
-
-		videos = append(videos, video)
+	// Convert to response format
+	responses := make([]VideoResponse, 0, len(videos))
+	for _, video := range videos {
+		responses = append(responses, VideoResponse{
+			ID:          video.ID,
+			Title:       video.Title,
+			URL:         fmt.Sprintf("/api/v1/videos/stream/%d", video.ID),
+			Size:        video.FileSize,
+			ContentType: video.ContentType,
+			UploadedAt:  video.CreatedAt,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(videos)
+	json.NewEncoder(w).Encode(responses)
 }
 
-// Stream serves a video file
+// Stream serves a video file by ID
 func (h *VideoHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	filename := chi.URLParam(r, "filename")
-	if filename == "" {
-		http.Error(w, "Filename required", http.StatusBadRequest)
+	idStr := chi.URLParam(r, "id")
+	if idStr == "" {
+		http.Error(w, "Video ID required", http.StatusBadRequest)
 		return
 	}
 
-	// Security: prevent path traversal
-	filename = filepath.Base(filename)
-	filePath := filepath.Join(h.uploadsPath, filename)
+	videoID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid video ID", http.StatusBadRequest)
+		return
+	}
+
+	// Get video metadata from database
+	video, err := h.queries.GetUploadedVideoByID(r.Context(), videoID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			http.Error(w, "Video not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to get video", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Build file path
+	filePath := filepath.Join(h.uploadsPath, video.Filename)
 
 	// Check if file exists
 	info, err := os.Stat(filePath)
 	if err != nil {
-		http.Error(w, "Video not found", http.StatusNotFound)
+		http.Error(w, "Video file not found", http.StatusNotFound)
 		return
 	}
 
@@ -187,36 +200,51 @@ func (h *VideoHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Set appropriate headers
-	w.Header().Set("Content-Type", "video/mp4") // Default to mp4, could be enhanced
+	w.Header().Set("Content-Type", video.ContentType)
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 
 	// Support range requests for video seeking
-	http.ServeContent(w, r, filename, info.ModTime(), file)
+	http.ServeContent(w, r, video.Filename, info.ModTime(), file)
 }
 
-// Delete removes a video file
+// Delete removes a video by ID
 func (h *VideoHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	filename := chi.URLParam(r, "filename")
-	if filename == "" {
-		http.Error(w, "Filename required", http.StatusBadRequest)
+	idStr := chi.URLParam(r, "id")
+	if idStr == "" {
+		http.Error(w, "Video ID required", http.StatusBadRequest)
 		return
 	}
 
-	// Security: prevent path traversal
-	filename = filepath.Base(filename)
-	filePath := filepath.Join(h.uploadsPath, filename)
-
-	// Check if file exists
-	if _, err := os.Stat(filePath); err != nil {
-		http.Error(w, "Video not found", http.StatusNotFound)
+	videoID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid video ID", http.StatusBadRequest)
 		return
 	}
 
-	// Delete the file
-	if err := os.Remove(filePath); err != nil {
+	// Get video metadata from database
+	video, err := h.queries.GetUploadedVideoByID(r.Context(), videoID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			http.Error(w, "Video not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Failed to get video", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Delete from database first
+	if err := h.queries.DeleteUploadedVideo(r.Context(), videoID); err != nil {
 		http.Error(w, "Failed to delete video", http.StatusInternalServerError)
 		return
+	}
+
+	// Delete file from filesystem
+	filePath := filepath.Join(h.uploadsPath, video.Filename)
+	if err := os.Remove(filePath); err != nil {
+		// Log error but don't fail the request since DB record is already deleted
+		// In production, you might want to queue this for retry
+		fmt.Printf("Warning: Failed to delete video file %s: %v\n", filePath, err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

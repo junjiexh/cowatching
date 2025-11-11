@@ -1,9 +1,8 @@
 import { Trash2 } from 'lucide-react';
 
 export interface Video {
-  id: string;
+  id: number;
   title: string;
-  filename: string;
   url: string;
   size: number;
   contentType?: string;
@@ -12,7 +11,7 @@ export interface Video {
 
 interface VideoListProps {
   videos: Video[];
-  currentVideoId: string | null;
+  currentVideoId: number | null;
   onVideoSelect: (video: Video) => void;
   onVideoDelete: (video: Video) => void;
   isLoading?: boolean;

@@ -51,7 +51,7 @@ export default function Player() {
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/v1/videos/${video.filename}`, {
+      const response = await fetch(`${API_URL}/api/v1/videos/${video.id}`, {
         method: 'DELETE',
       });
 

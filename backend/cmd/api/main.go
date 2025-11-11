@@ -71,8 +71,8 @@ func main() {
 		r.Route("/videos", func(r chi.Router) {
 			r.Get("/", h.Video.List)
 			r.Post("/upload", h.Video.Upload)
-			r.Get("/stream/{filename}", h.Video.Stream)
-			r.Delete("/{filename}", h.Video.Delete)
+			r.Get("/stream/{id}", h.Video.Stream)
+			r.Delete("/{id}", h.Video.Delete)
 		})
 
 		// Placeholder route
