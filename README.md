@@ -35,6 +35,10 @@ This is a full-stack application with:
 
 ### Running with Docker Compose
 
+The project uses modular Docker Compose files:
+- `docker-compose.db.yml` - Database only (PostgreSQL)
+- `docker-compose.yml` - Full stack (includes db via `include` directive)
+
 1. Clone the repository:
 ```bash
 git clone <repository-url>
@@ -46,15 +50,22 @@ cd cowatching
 cp .env.example .env
 ```
 
-3. Start all services:
+3. **Option A: Start all services** (recommended):
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 This will start:
 - **PostgreSQL** on `localhost:5432`
 - **Backend API** on `localhost:8080`
 - **Frontend** on `localhost:3000`
+
+3. **Option B: Start only the database** (for local development):
+```bash
+docker compose -f docker-compose.db.yml up -d
+```
+
+This is useful when you want to run backend/frontend locally but need the database.
 
 4. Check services are running:
 ```bash
@@ -91,7 +102,7 @@ sqlc generate
 
 4. Start PostgreSQL:
 ```bash
-docker-compose up -d postgres
+docker compose -f docker-compose.db.yml up -d
 ```
 
 5. Run the backend:
@@ -200,21 +211,39 @@ npm test
 
 ## Docker Commands
 
+### Full Stack (All Services)
+
 ```bash
-# Start all services
-docker-compose up -d
+# Start all services (backend, frontend, database)
+docker compose up -d
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Rebuild and start
-docker-compose up -d --build
+docker compose up -d --build
 
 # Stop and remove volumes (WARNING: deletes data)
-docker-compose down -v
+docker compose down -v
+```
+
+### Database Only
+
+```bash
+# Start only PostgreSQL
+docker compose -f docker-compose.db.yml up -d
+
+# View database logs
+docker compose -f docker-compose.db.yml logs -f
+
+# Stop database
+docker compose -f docker-compose.db.yml down
+
+# Stop and remove database volumes (WARNING: deletes data)
+docker compose -f docker-compose.db.yml down -v
 ```
 
 ## Environment Variables
