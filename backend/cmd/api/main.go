@@ -67,18 +67,13 @@ func main() {
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
-		// Add API routes here
-		// r.Route("/users", func(r chi.Router) {
-		//     r.Get("/", h.Users.List)
-		//     r.Post("/", h.Users.Create)
-		//     r.Get("/{id}", h.Users.Get)
-		// })
-
-		// r.Route("/rooms", func(r chi.Router) {
-		//     r.Get("/", h.Rooms.List)
-		//     r.Post("/", h.Rooms.Create)
-		//     r.Get("/{id}", h.Rooms.Get)
-		// })
+		// Video routes
+		r.Route("/videos", func(r chi.Router) {
+			r.Get("/", h.Video.List)
+			r.Post("/upload", h.Video.Upload)
+			r.Get("/stream/{filename}", h.Video.Stream)
+			r.Delete("/{filename}", h.Video.Delete)
+		})
 
 		// Placeholder route
 		r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
