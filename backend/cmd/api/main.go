@@ -17,6 +17,7 @@ import (
 	"github.com/junjiexh/cowatching/internal/config"
 	"github.com/junjiexh/cowatching/internal/database"
 	"github.com/junjiexh/cowatching/internal/handlers"
+	"github.com/junjiexh/cowatching/internal/s3"
 )
 
 func main() {
@@ -33,8 +34,20 @@ func main() {
 	}
 	defer db.Close()
 
+	// Initialize S3 client
+	s3Client, err := s3.NewS3Client(s3.S3Config{
+		Region:         cfg.AWSRegion,
+		AccessKeyID:    cfg.AWSAccessKeyID,
+		SecretAccessKey: cfg.AWSSecretAccessKey,
+		BucketName:     cfg.S3BucketName,
+		VideoPrefix:    cfg.S3VideoPrefix,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize S3 client: %v", err)
+	}
+
 	// Initialize handlers
-	h := handlers.New(db)
+	h := handlers.New(db, s3Client)
 
 	// Setup router
 	r := chi.NewRouter()

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/junjiexh/cowatching/internal/database"
+	"github.com/junjiexh/cowatching/internal/s3"
 )
 
 type Handlers struct {
@@ -12,10 +13,10 @@ type Handlers struct {
 	// Rooms  *RoomsHandler
 }
 
-func New(db *database.Database) *Handlers {
+func New(db *database.Database, s3Client *s3.S3Client) *Handlers {
 	return &Handlers{
 		Health: NewHealthHandler(db),
-		Video:  NewVideoHandler(db),
+		Video:  NewVideoHandler(db, s3Client),
 		// Initialize other handlers here
 	}
 }

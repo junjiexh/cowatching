@@ -1,6 +1,6 @@
 -- name: CreateUploadedVideo :one
-INSERT INTO uploaded_videos (title, filename, content_type, file_size)
-VALUES ($1, $2, $3, $4)
+INSERT INTO uploaded_videos (title, filename, content_type, file_size, s3_key, s3_url)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetUploadedVideoByID :one

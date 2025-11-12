@@ -16,6 +16,7 @@ import (
 
 	"github.com/junjiexh/cowatching/internal/database"
 	"github.com/junjiexh/cowatching/internal/database/db"
+	"github.com/junjiexh/cowatching/internal/s3"
 )
 
 const (
@@ -27,6 +28,7 @@ type VideoHandler struct {
 	db          *database.Database
 	queries     *db.Queries
 	uploadsPath string
+	s3Client    *s3.S3Client
 }
 
 type VideoResponse struct {
@@ -38,7 +40,7 @@ type VideoResponse struct {
 	UploadedAt  time.Time `json:"uploadedAt"`
 }
 
-func NewVideoHandler(database *database.Database) *VideoHandler {
+func NewVideoHandler(database *database.Database, s3Client *s3.S3Client) *VideoHandler {
 	// Ensure uploads directory exists
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		panic(fmt.Sprintf("failed to create uploads directory: %v", err))
@@ -48,6 +50,7 @@ func NewVideoHandler(database *database.Database) *VideoHandler {
 		db:          database,
 		queries:     db.NewWithPool(database.Pool),
 		uploadsPath: uploadsDir,
+		s3Client:    s3Client,
 	}
 }
 
@@ -75,27 +78,13 @@ func (h *VideoHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate unique filename
+	// Generate unique filename/key for S3
 	ext := filepath.Ext(header.Filename)
 	timestamp := time.Now().Unix()
 	filename := fmt.Sprintf("%d_%s", timestamp, header.Filename)
-	filePath := filepath.Join(h.uploadsPath, filename)
 
-	// Create the file
-	dst, err := os.Create(filePath)
-	if err != nil {
-		http.Error(w, "Failed to save video", http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	// Copy the uploaded file to the destination
-	size, err := io.Copy(dst, file)
-	if err != nil {
-		os.Remove(filePath) // Clean up on error
-		http.Error(w, "Failed to save video", http.StatusInternalServerError)
-		return
-	}
+	// Get file size
+	fileSize := header.Size
 
 	// Get title from form or use filename
 	title := r.FormValue("title")
@@ -103,15 +92,27 @@ func (h *VideoHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		title = strings.TrimSuffix(header.Filename, ext)
 	}
 
-	// Save to database
+	// Upload to S3
+	s3URL, err := h.s3Client.UploadVideo(r.Context(), filename, file, contentType, fileSize)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to upload video to S3: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save metadata to database
 	video, err := h.queries.CreateUploadedVideo(r.Context(), db.CreateUploadedVideoParams{
 		Title:       title,
-		Filename:    filename,
+		Filename:    &filename,
 		ContentType: contentType,
-		FileSize:    size,
+		FileSize:    fileSize,
+		S3Key:       &filename,
+		S3Url:       &s3URL,
 	})
 	if err != nil {
-		os.Remove(filePath) // Clean up on error
+		// Try to clean up S3 file on database error
+		if deleteErr := h.s3Client.DeleteVideo(r.Context(), filename); deleteErr != nil {
+			fmt.Printf("Warning: Failed to clean up S3 file after DB error: %v\n", deleteErr)
+		}
 		http.Error(w, "Failed to save video metadata", http.StatusInternalServerError)
 		return
 	}
@@ -156,7 +157,7 @@ func (h *VideoHandler) List(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(responses)
 }
 
-// Stream serves a video file by ID
+// Stream serves a video file by ID from S3
 func (h *VideoHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	if idStr == "" {
@@ -181,34 +182,24 @@ func (h *VideoHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build file path
-	filePath := filepath.Join(h.uploadsPath, video.Filename)
-
-	// Check if file exists
-	info, err := os.Stat(filePath)
-	if err != nil {
-		http.Error(w, "Video file not found", http.StatusNotFound)
+	// Check if video has S3 key
+	if video.S3Key == nil || *video.S3Key == "" {
+		http.Error(w, "Video not stored in S3", http.StatusNotFound)
 		return
 	}
 
-	// Open the file
-	file, err := os.Open(filePath)
+	// Generate presigned URL with 1 hour expiration
+	presignedURL, err := h.s3Client.GetVideoURL(r.Context(), *video.S3Key, 1*time.Hour)
 	if err != nil {
-		http.Error(w, "Failed to open video", http.StatusInternalServerError)
+		http.Error(w, "Failed to generate video URL", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
 
-	// Set appropriate headers
-	w.Header().Set("Content-Type", video.ContentType)
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-
-	// Support range requests for video seeking
-	http.ServeContent(w, r, video.Filename, info.ModTime(), file)
+	// Redirect to the presigned URL
+	http.Redirect(w, r, presignedURL, http.StatusTemporaryRedirect)
 }
 
-// Delete removes a video by ID
+// Delete removes a video by ID from database and S3
 func (h *VideoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	if idStr == "" {
@@ -239,12 +230,13 @@ func (h *VideoHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete file from filesystem
-	filePath := filepath.Join(h.uploadsPath, video.Filename)
-	if err := os.Remove(filePath); err != nil {
-		// Log error but don't fail the request since DB record is already deleted
-		// In production, you might want to queue this for retry
-		fmt.Printf("Warning: Failed to delete video file %s: %v\n", filePath, err)
+	// Delete file from S3
+	if video.S3Key != nil && *video.S3Key != "" {
+		if err := h.s3Client.DeleteVideo(r.Context(), *video.S3Key); err != nil {
+			// Log error but don't fail the request since DB record is already deleted
+			// In production, you might want to queue this for retry
+			fmt.Printf("Warning: Failed to delete video from S3 %s: %v\n", *video.S3Key, err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

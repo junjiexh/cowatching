@@ -21,16 +21,18 @@ func (q *Queries) CountUploadedVideos(ctx context.Context) (int64, error) {
 }
 
 const createUploadedVideo = `-- name: CreateUploadedVideo :one
-INSERT INTO uploaded_videos (title, filename, content_type, file_size)
-VALUES ($1, $2, $3, $4)
-RETURNING id, title, filename, content_type, file_size, created_at, updated_at
+INSERT INTO uploaded_videos (title, filename, content_type, file_size, s3_key, s3_url)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, title, filename, content_type, file_size, created_at, updated_at, s3_key, s3_url
 `
 
 type CreateUploadedVideoParams struct {
-	Title       string `json:"title"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"contentType"`
-	FileSize    int64  `json:"fileSize"`
+	Title       string  `json:"title"`
+	Filename    *string `json:"filename"`
+	ContentType string  `json:"contentType"`
+	FileSize    int64   `json:"fileSize"`
+	S3Key       *string `json:"s3Key"`
+	S3Url       *string `json:"s3Url"`
 }
 
 func (q *Queries) CreateUploadedVideo(ctx context.Context, arg CreateUploadedVideoParams) (UploadedVideo, error) {
@@ -39,6 +41,8 @@ func (q *Queries) CreateUploadedVideo(ctx context.Context, arg CreateUploadedVid
 		arg.Filename,
 		arg.ContentType,
 		arg.FileSize,
+		arg.S3Key,
+		arg.S3Url,
 	)
 	var i UploadedVideo
 	err := row.Scan(
@@ -49,6 +53,8 @@ func (q *Queries) CreateUploadedVideo(ctx context.Context, arg CreateUploadedVid
 		&i.FileSize,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.S3Key,
+		&i.S3Url,
 	)
 	return i, err
 }
@@ -64,11 +70,11 @@ func (q *Queries) DeleteUploadedVideo(ctx context.Context, id int64) error {
 }
 
 const getUploadedVideoByFilename = `-- name: GetUploadedVideoByFilename :one
-SELECT id, title, filename, content_type, file_size, created_at, updated_at FROM uploaded_videos
+SELECT id, title, filename, content_type, file_size, created_at, updated_at, s3_key, s3_url FROM uploaded_videos
 WHERE filename = $1
 `
 
-func (q *Queries) GetUploadedVideoByFilename(ctx context.Context, filename string) (UploadedVideo, error) {
+func (q *Queries) GetUploadedVideoByFilename(ctx context.Context, filename *string) (UploadedVideo, error) {
 	row := q.db.QueryRow(ctx, getUploadedVideoByFilename, filename)
 	var i UploadedVideo
 	err := row.Scan(
@@ -79,12 +85,14 @@ func (q *Queries) GetUploadedVideoByFilename(ctx context.Context, filename strin
 		&i.FileSize,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.S3Key,
+		&i.S3Url,
 	)
 	return i, err
 }
 
 const getUploadedVideoByID = `-- name: GetUploadedVideoByID :one
-SELECT id, title, filename, content_type, file_size, created_at, updated_at FROM uploaded_videos
+SELECT id, title, filename, content_type, file_size, created_at, updated_at, s3_key, s3_url FROM uploaded_videos
 WHERE id = $1
 `
 
@@ -99,12 +107,14 @@ func (q *Queries) GetUploadedVideoByID(ctx context.Context, id int64) (UploadedV
 		&i.FileSize,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.S3Key,
+		&i.S3Url,
 	)
 	return i, err
 }
 
 const listUploadedVideos = `-- name: ListUploadedVideos :many
-SELECT id, title, filename, content_type, file_size, created_at, updated_at FROM uploaded_videos
+SELECT id, title, filename, content_type, file_size, created_at, updated_at, s3_key, s3_url FROM uploaded_videos
 ORDER BY created_at DESC
 `
 
@@ -125,6 +135,8 @@ func (q *Queries) ListUploadedVideos(ctx context.Context) ([]UploadedVideo, erro
 			&i.FileSize,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.S3Key,
+			&i.S3Url,
 		); err != nil {
 			return nil, err
 		}
@@ -140,7 +152,7 @@ const updateUploadedVideo = `-- name: UpdateUploadedVideo :one
 UPDATE uploaded_videos
 SET title = $2, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, title, filename, content_type, file_size, created_at, updated_at
+RETURNING id, title, filename, content_type, file_size, created_at, updated_at, s3_key, s3_url
 `
 
 type UpdateUploadedVideoParams struct {
@@ -159,6 +171,8 @@ func (q *Queries) UpdateUploadedVideo(ctx context.Context, arg UpdateUploadedVid
 		&i.FileSize,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.S3Key,
+		&i.S3Url,
 	)
 	return i, err
 }

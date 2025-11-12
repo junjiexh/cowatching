@@ -11,9 +11,11 @@ import (
 type UploadedVideo struct {
 	ID          int64     `json:"id"`
 	Title       string    `json:"title"`
-	Filename    string    `json:"filename"`
+	Filename    *string   `json:"filename"`
 	ContentType string    `json:"contentType"`
 	FileSize    int64     `json:"fileSize"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+	S3Key       *string   `json:"s3Key"`
+	S3Url       *string   `json:"s3Url"`
 }
