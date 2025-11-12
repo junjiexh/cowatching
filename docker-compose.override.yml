@@ -1,0 +1,12 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: cowatching-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # preserve container's node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped

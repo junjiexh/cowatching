@@ -1,7 +1,28 @@
-include:
-  - docker-compose.db.yml
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cowatching-postgres
+    restart: always
+    shm_size: 128mb
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-cowatching}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-cowatching}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -27,7 +48,10 @@ services:
       dockerfile: Dockerfile
     container_name: cowatching-frontend
     ports:
-      - "3000:3000"
+      - "5173:5173"
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  postgres_data:
