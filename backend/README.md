@@ -167,15 +167,6 @@ go test ./...
 golangci-lint run
 ```
 
-### Hot Reload
-
-Install air for hot reload during development:
-
-```bash
-go install github.com/cosmtrek/air@latest
-air
-```
-
 ## Database
 
 ### Migrations

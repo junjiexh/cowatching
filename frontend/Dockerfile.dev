@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+# Enable pnpm via corepack
+RUN corepack enable
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install all dependencies (including dev dependencies for hot reload)
+RUN pnpm install --frozen-lockfile
+
+# Copy application files
+COPY . .
+
+# Run the development server with hot reload
+CMD ["pnpm", "run", "dev"]
